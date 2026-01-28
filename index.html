@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>直径測定 AR</title>
+    <title>直径測定</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#28a745">
+    
     <style>
         body {
             margin: 0;
@@ -119,7 +122,7 @@
     <div class="crosshair-h"></div>
 
     <div id="start-overlay">
-        <h1>🌳 直径測定アプリ</h1>
+        <h1>直径測定v1.0</h1>
         <p style="color:#ccc; margin-bottom:30px;">
             木までの距離と<br>左右の角度差で直径を計算します。<br>
             <small>※コンパスセンサーを使用します</small>
@@ -162,7 +165,7 @@
             debugLog.textContent = "起動処理中...";
 
             try {
-                // 【修正点】1. iOSでは何よりも先に、ボタン押下直後にセンサー許可を取る！
+                // 1. iOSでは何よりも先に、ボタン押下直後にセンサー許可を取る！
                 if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                     const permission = await DeviceOrientationEvent.requestPermission();
                     if (permission !== 'granted') {
@@ -259,6 +262,17 @@
             document.getElementById('btn-reset').style.display = 'none';
             document.getElementById('result-box').style.display = 'none';
             document.getElementById('input-box').style.display = 'flex';
+        }
+
+        // --- PWA Service Worker 登録 ---
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('./sw.js').then(function(registration) {
+                    console.log('ServiceWorker registration successful with scope: ', registration.scope);
+                }, function(err) {
+                    console.log('ServiceWorker registration failed: ', err);
+                });
+            });
         }
     </script>
 </body>
