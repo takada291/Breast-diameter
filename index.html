@@ -21,7 +21,7 @@
             z-index: -1;
         }
 
-        /* 照準（今回は横幅を意識して縦線メイン） */
+        /* 照準 */
         .crosshair-v {
             position: fixed;
             top: 10%; left: 50%; width: 2px; height: 80%;
@@ -125,6 +125,7 @@
             <small>※コンパスセンサーを使用します</small>
         </p>
         <button onclick="startApp()" style="background:#28a745;">測定スタート</button>
+        <p id="debug-log" style="font-size:0.7rem; color:red; margin-top:10px;"></p>
     </div>
 
     <div class="top-info" id="top-ui" style="display:none;">
@@ -154,23 +155,30 @@
         let currentAlpha = 0;
         let leftAngle = null;
         let rightAngle = null;
-        let step = 0; // 0:未開, 1:左済, 2:右済(完了)
+        let step = 0; 
 
         async function startApp() {
+            const debugLog = document.getElementById('debug-log');
+            debugLog.textContent = "起動処理中...";
+
             try {
-                // カメラ起動
+                // 【修正点】1. iOSでは何よりも先に、ボタン押下直後にセンサー許可を取る！
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    const permission = await DeviceOrientationEvent.requestPermission();
+                    if (permission !== 'granted') {
+                        alert("コンパスの使用が拒否されました。\nブラウザの設定を確認してください。");
+                        debugLog.textContent = "センサー拒否";
+                        return;
+                    }
+                }
+
+                // 2. その後にカメラを起動
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: 'environment' } 
                 });
                 document.getElementById('camera-view').srcObject = stream;
 
-                // センサー許可 (iOS用)
-                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                    const permission = await DeviceOrientationEvent.requestPermission();
-                    if (permission !== 'granted') alert("コンパスの使用が拒否されました");
-                }
-
-                // イベントリスナー
+                // 3. センサーイベント開始
                 window.addEventListener('deviceorientation', handleOrientation);
 
                 // UI切り替え
@@ -180,16 +188,16 @@
                 resetMeasurement();
 
             } catch (err) {
-                alert("エラー: " + err.message + "\nhttpsでアクセスしていますか？");
+                console.error(err);
+                debugLog.textContent = "Error: " + err.message;
+                alert("起動エラー: " + err.message);
             }
         }
 
         function handleOrientation(event) {
-            // alpha: Z軸周りの回転（0-360度、コンパスの方位）
-            // ※AndroidとiOSで基準が違うことがありますが、「差分」を見るので今回はそのまま使います
             let alpha = event.alpha; 
             
-            // Webkit(iOS)の場合は webkitCompassHeading を使う方が精度が良い場合がある
+            // iOS用プロパティがあれば優先使用
             if (event.webkitCompassHeading) {
                 alpha = event.webkitCompassHeading;
             }
@@ -202,22 +210,18 @@
 
         function handleAction() {
             if (step === 0) {
-                // 左端を記録
                 leftAngle = currentAlpha;
                 step = 1;
                 
-                // UI更新
                 document.getElementById('step-status').textContent = "左端を記録済み";
                 document.getElementById('btn-action').textContent = "② 右端で測定完了";
-                document.getElementById('btn-action').style.backgroundColor = "#e67e22"; // オレンジ
-                document.getElementById('input-box').style.display = 'none'; // 距離固定
+                document.getElementById('btn-action').style.backgroundColor = "#e67e22"; 
+                document.getElementById('input-box').style.display = 'none'; 
             } else if (step === 1) {
-                // 右端を記録して計算
                 rightAngle = currentAlpha;
                 calcDiameter();
                 step = 2;
 
-                // UI更新
                 document.getElementById('step-status').textContent = "測定完了";
                 document.getElementById('btn-action').style.display = 'none';
                 document.getElementById('btn-reset').style.display = 'block';
@@ -227,20 +231,18 @@
         function calcDiameter() {
             const distM = parseFloat(document.getElementById('dist-input').value);
             
-            // 角度差を計算 (360度の境界またぎを考慮)
+            // 角度差計算 (360度境界またぎ対応)
             let diff = Math.abs(rightAngle - leftAngle);
             if (diff > 180) {
                 diff = 360 - diff;
             }
 
             // 直径計算: D = 2 * L * sin(θ/2)
-            // Math.sinはラジアンを受け取るので変換が必要
             const thetaRad = diff * (Math.PI / 180);
             const radius = distM * Math.sin(thetaRad / 2);
             const diameterM = radius * 2;
             const diameterCm = diameterM * 100;
 
-            // 結果表示
             document.getElementById('result-box').style.display = 'block';
             document.getElementById('res-cm').textContent = diameterCm.toFixed(1);
             document.getElementById('res-dist').textContent = distM;
