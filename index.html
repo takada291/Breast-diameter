@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>直径測定 AR</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #000;
+            color: white;
+        }
+
+        /* カメラ映像 */
+        #camera-view {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            object-fit: cover;
+            z-index: -1;
+        }
+
+        /* 照準（今回は横幅を意識して縦線メイン） */
+        .crosshair-v {
+            position: fixed;
+            top: 10%; left: 50%; width: 2px; height: 80%;
+            background-color: rgba(255, 0, 0, 0.8);
+            transform: translateX(-50%);
+            box-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+        }
+        .crosshair-h {
+            position: fixed;
+            top: 50%; left: 30%; width: 40%; height: 2px;
+            background-color: rgba(255, 0, 0, 0.4);
+            transform: translateY(-50%);
+        }
+
+        /* UIレイヤー */
+        .ui-container {
+            position: absolute;
+            bottom: 0; left: 0; width: 100%;
+            padding: 20px;
+            box-sizing: border-box;
+            background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0) 100%);
+            text-align: center;
+        }
+
+        .top-info {
+            position: absolute; top: 10px; left: 0; width: 100%;
+            text-align: center; pointer-events: none;
+            text-shadow: 1px 1px 2px black;
+        }
+        
+        .angle-val {
+            font-size: 1.5rem; font-weight: bold; color: #ffcc00;
+        }
+
+        /* 入力エリア */
+        .input-area {
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+        }
+        input[type="number"] {
+            font-size: 1.2rem; padding: 5px; width: 80px; text-align: center;
+            border: 1px solid #ccc; border-radius: 5px;
+        }
+
+        /* ボタン */
+        button {
+            width: 100%; padding: 18px;
+            font-size: 1.2rem; font-weight: bold;
+            border: none; border-radius: 50px;
+            cursor: pointer; color: white;
+            transition: transform 0.1s;
+            margin-bottom: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        button:active { transform: scale(0.96); }
+        
+        #btn-action { background-color: #007bff; }
+        #btn-reset { background-color: #6c757d; font-size: 1rem; padding: 12px; display:none; }
+
+        /* スタート画面 */
+        #start-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); z-index: 999;
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            padding: 20px; text-align: center;
+        }
+
+        /* 結果表示 */
+        #result-box {
+            background: white; color: #333;
+            padding: 20px; border-radius: 15px;
+            margin-bottom: 15px; display: none;
+        }
+        .result-val { font-size: 2.5rem; font-weight: bold; color: #28a745; }
+
+        .status-badge {
+            display: inline-block; padding: 5px 10px;
+            border-radius: 4px; background: rgba(0,0,0,0.5);
+            font-size: 0.9rem; margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <video id="camera-view" autoplay playsinline muted></video>
+    <div class="crosshair-v"></div>
+    <div class="crosshair-h"></div>
+
+    <div id="start-overlay">
+        <h1>🌳 直径測定アプリ</h1>
+        <p style="color:#ccc; margin-bottom:30px;">
+            木までの距離と<br>左右の角度差で直径を計算します。<br>
+            <small>※コンパスセンサーを使用します</small>
+        </p>
+        <button onclick="startApp()" style="background:#28a745;">測定スタート</button>
+    </div>
+
+    <div class="top-info" id="top-ui" style="display:none;">
+        <div class="status-badge" id="step-status">待機中</div>
+        <div class="angle-val">方位: <span id="current-heading">--</span>°</div>
+    </div>
+
+    <div class="ui-container" id="main-ui" style="display:none;">
+        
+        <div id="result-box">
+            <div>推定直径 (DBH)</div>
+            <div class="result-val"><span id="res-cm">0</span> cm</div>
+            <div style="font-size:0.9rem; color:#666;">距離 <span id="res-dist">--</span>m の場合</div>
+        </div>
+
+        <div class="input-area" id="input-box">
+            <label>木までの距離:</label>
+            <input type="number" id="dist-input" value="0.6" step="0.1"> m
+            <div style="font-size:0.8rem; color:#666;">(腕の長さ等)</div>
+        </div>
+
+        <button id="btn-action" onclick="handleAction()">① 左端を記録</button>
+        <button id="btn-reset" onclick="resetMeasurement()">リセット</button>
+    </div>
+
+    <script>
+        let currentAlpha = 0;
+        let leftAngle = null;
+        let rightAngle = null;
+        let step = 0; // 0:未開, 1:左済, 2:右済(完了)
+
+        async function startApp() {
+            try {
+                // カメラ起動
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
+                document.getElementById('camera-view').srcObject = stream;
+
+                // センサー許可 (iOS用)
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    const permission = await DeviceOrientationEvent.requestPermission();
+                    if (permission !== 'granted') alert("コンパスの使用が拒否されました");
+                }
+
+                // イベントリスナー
+                window.addEventListener('deviceorientation', handleOrientation);
+
+                // UI切り替え
+                document.getElementById('start-overlay').style.display = 'none';
+                document.getElementById('top-ui').style.display = 'block';
+                document.getElementById('main-ui').style.display = 'block';
+                resetMeasurement();
+
+            } catch (err) {
+                alert("エラー: " + err.message + "\nhttpsでアクセスしていますか？");
+            }
+        }
+
+        function handleOrientation(event) {
+            // alpha: Z軸周りの回転（0-360度、コンパスの方位）
+            // ※AndroidとiOSで基準が違うことがありますが、「差分」を見るので今回はそのまま使います
+            let alpha = event.alpha; 
+            
+            // Webkit(iOS)の場合は webkitCompassHeading を使う方が精度が良い場合がある
+            if (event.webkitCompassHeading) {
+                alpha = event.webkitCompassHeading;
+            }
+
+            if (alpha !== null) {
+                currentAlpha = alpha;
+                document.getElementById('current-heading').textContent = alpha.toFixed(1);
+            }
+        }
+
+        function handleAction() {
+            if (step === 0) {
+                // 左端を記録
+                leftAngle = currentAlpha;
+                step = 1;
+                
+                // UI更新
+                document.getElementById('step-status').textContent = "左端を記録済み";
+                document.getElementById('btn-action').textContent = "② 右端で測定完了";
+                document.getElementById('btn-action').style.backgroundColor = "#e67e22"; // オレンジ
+                document.getElementById('input-box').style.display = 'none'; // 距離固定
+            } else if (step === 1) {
+                // 右端を記録して計算
+                rightAngle = currentAlpha;
+                calcDiameter();
+                step = 2;
+
+                // UI更新
+                document.getElementById('step-status').textContent = "測定完了";
+                document.getElementById('btn-action').style.display = 'none';
+                document.getElementById('btn-reset').style.display = 'block';
+            }
+        }
+
+        function calcDiameter() {
+            const distM = parseFloat(document.getElementById('dist-input').value);
+            
+            // 角度差を計算 (360度の境界またぎを考慮)
+            let diff = Math.abs(rightAngle - leftAngle);
+            if (diff > 180) {
+                diff = 360 - diff;
+            }
+
+            // 直径計算: D = 2 * L * sin(θ/2)
+            // Math.sinはラジアンを受け取るので変換が必要
+            const thetaRad = diff * (Math.PI / 180);
+            const radius = distM * Math.sin(thetaRad / 2);
+            const diameterM = radius * 2;
+            const diameterCm = diameterM * 100;
+
+            // 結果表示
+            document.getElementById('result-box').style.display = 'block';
+            document.getElementById('res-cm').textContent = diameterCm.toFixed(1);
+            document.getElementById('res-dist').textContent = distM;
+        }
+
+        function resetMeasurement() {
+            step = 0;
+            leftAngle = null;
+            rightAngle = null;
+            document.getElementById('step-status').textContent = "木までの距離を確認してください";
+            document.getElementById('btn-action').textContent = "① 左端を記録";
+            document.getElementById('btn-action').style.backgroundColor = "#007bff";
+            document.getElementById('btn-action').style.display = 'block';
+            document.getElementById('btn-reset').style.display = 'none';
+            document.getElementById('result-box').style.display = 'none';
+            document.getElementById('input-box').style.display = 'flex';
+        }
+    </script>
+</body>
+</html>
