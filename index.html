@@ -59,7 +59,7 @@
             font-size: 1.5rem; font-weight: bold; color: #ffcc00;
         }
 
-        /* 入力エリア */
+        /* 入力エリア（スロット用スタイル追加） */
         .input-area {
             background: rgba(255, 255, 255, 0.9);
             color: #333;
@@ -67,13 +67,30 @@
             border-radius: 12px;
             margin-bottom: 10px;
             display: flex;
+            flex-direction: column; /* 縦並びに変更 */
             justify-content: center;
             align-items: center;
-            gap: 10px;
+            gap: 5px;
         }
-        input[type="number"] {
-            font-size: 1.2rem; padding: 5px; width: 80px; text-align: center;
-            border: 1px solid #ccc; border-radius: 5px;
+        
+        .slot-container {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        /* スロット風セレクトボックス */
+        select.slot-select {
+            font-size: 2rem;
+            padding: 10px;
+            width: 70px;
+            text-align: center;
+            border: 2px solid #28a745;
+            border-radius: 8px;
+            background-color: white;
+            color: #333;
+            appearance: none; /* デフォルトの矢印を消す */
+            -webkit-appearance: none;
         }
 
         /* ボタン */
@@ -85,6 +102,7 @@
             transition: transform 0.1s;
             margin-bottom: 10px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            box-sizing: border-box; /* はみ出し防止に追加 */
         }
         button:active { transform: scale(0.96); }
         
@@ -98,6 +116,7 @@
             display: flex; flex-direction: column;
             justify-content: center; align-items: center;
             padding: 20px; text-align: center;
+            box-sizing: border-box; /* 追加 */
         }
 
         /* 結果表示 */
@@ -122,10 +141,10 @@
     <div class="crosshair-h"></div>
 
     <div id="start-overlay">
-        <h1>直径測定v1.0</h1>
+        <h1>直径測定v1.1</h1>
         <p style="color:#ccc; margin-bottom:30px;">
-            木までの距離と<br>左右の角度差で直径を計算します。<br>
-            <small>※コンパスセンサーを使用します</small>
+            立木から端末までの距離と<br>左端・右端の角度差から直径を計算<br>
+            <small>※コンパスセンサー、カメラの使用を許可</small>
         </p>
         <button onclick="startApp()" style="background:#28a745;">測定スタート</button>
         <p id="debug-log" style="font-size:0.7rem; color:red; margin-top:10px;"></p>
@@ -141,13 +160,18 @@
         <div id="result-box">
             <div>推定直径 (DBH)</div>
             <div class="result-val"><span id="res-cm">0</span> cm</div>
-            <div style="font-size:0.9rem; color:#666;">距離 <span id="res-dist">--</span>m の場合</div>
+            <div style="font-size:0.9rem; color:#666;">距離 <span id="res-dist">--</span>cm の場合</div>
         </div>
 
         <div class="input-area" id="input-box">
-            <label>木までの距離:</label>
-            <input type="number" id="dist-input" value="0.6" step="0.1"> m
-            <div style="font-size:0.8rem; color:#666;">(腕の長さ等)</div>
+            <label style="font-weight:bold; margin-bottom:5px;">立木までの距離 (腕長等)</label>
+            <div class="slot-container">
+                <select id="dist-tens" class="slot-select">
+                    </select>
+                <select id="dist-ones" class="slot-select">
+                    </select>
+                <span style="font-size:1.5rem; font-weight:bold;">cm</span>
+            </div>
         </div>
 
         <button id="btn-action" onclick="handleAction()">① 左端を記録</button>
@@ -159,6 +183,29 @@
         let leftAngle = null;
         let rightAngle = null;
         let step = 0; 
+
+        // ページ読み込み時にセレクトボックスの中身を生成
+        window.onload = function() {
+            const tensSelect = document.getElementById('dist-tens');
+            const onesSelect = document.getElementById('dist-ones');
+
+            // 0から9までの選択肢を作成
+            for (let i = 0; i <= 9; i++) {
+                // 十の位
+                let opt1 = document.createElement('option');
+                opt1.value = i;
+                opt1.text = i;
+                if(i === 6) opt1.selected = true; // デフォルト6
+                tensSelect.appendChild(opt1);
+
+                // 一の位
+                let opt2 = document.createElement('option');
+                opt2.value = i;
+                opt2.text = i;
+                if(i === 5) opt2.selected = true; // デフォルト5
+                onesSelect.appendChild(opt2);
+            }
+        };
 
         async function startApp() {
             const debugLog = document.getElementById('debug-log');
@@ -232,7 +279,14 @@
         }
 
         function calcDiameter() {
-            const distM = parseFloat(document.getElementById('dist-input').value);
+            // スロット（セレクトボックス）から数値を取得
+            const tens = parseInt(document.getElementById('dist-tens').value);
+            const ones = parseInt(document.getElementById('dist-ones').value);
+            
+            // cmを計算
+            const distCm = (tens * 10) + ones;
+            // 計算用にmに変換
+            const distM = distCm / 100;
             
             // 角度差計算 (360度境界またぎ対応)
             let diff = Math.abs(rightAngle - leftAngle);
@@ -248,7 +302,7 @@
 
             document.getElementById('result-box').style.display = 'block';
             document.getElementById('res-cm').textContent = diameterCm.toFixed(1);
-            document.getElementById('res-dist').textContent = distM;
+            document.getElementById('res-dist').textContent = distCm; // 結果表示はcmで
         }
 
         function resetMeasurement() {
